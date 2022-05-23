@@ -110,6 +110,43 @@ RISCVTTIImpl::getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx,
   return TTI::TCC_Free;
 }
 
+InstructionCost RISCVTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst,
+                                               Type *Src,
+                                               TTI::CastContextHint CCH,
+                                               TTI::TargetCostKind CostKind,
+                                               const Instruction *I) {
+  if (!isa<ScalableVectorType>(Dst) || !isa<ScalableVectorType>(Src))
+    return BaseT::getCastInstrCost(Opcode, Dst, Src, CCH, CostKind, I);
+
+  unsigned LegalizationFactor = 1;
+  if (!isTypeLegal(Dst))
+    LegalizationFactor = 2;
+  if (!isTypeLegal(Src))
+    LegalizationFactor *= 2;
+
+  EVT DstVT = getTLI()->getValueType(DL, Dst);
+  EVT SrcVT = getTLI()->getValueType(DL, Src);
+
+  // Truncating a mask is cheap (vmsne.vi)
+  if (Dst->getScalarSizeInBits() == 1)
+    return LegalizationFactor;
+
+  // Extending to a mask should be cheap (vmv.v with mask)
+  if (Src->getScalarSizeInBits() == 1)
+    return LegalizationFactor;
+
+  int BitRatio =
+      std::max(DstVT.getScalarSizeInBits(), SrcVT.getScalarSizeInBits()) /
+      std::min(DstVT.getScalarSizeInBits(), SrcVT.getScalarSizeInBits());
+
+  // This case can be done with a single instruction.
+  if (BitRatio <= 2)
+    return LegalizationFactor;
+
+  // This costs log2(BitRatio) because we need to do several conversions.
+  return LegalizationFactor * Log2_32(BitRatio);
+}
+
 TargetTransformInfo::PopcntSupportKind
 RISCVTTIImpl::getPopcntSupport(unsigned TyWidth) {
   assert(isPowerOf2_32(TyWidth) && "Ty width must be power of 2");
