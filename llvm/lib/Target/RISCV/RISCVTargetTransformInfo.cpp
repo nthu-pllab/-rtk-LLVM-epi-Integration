@@ -244,6 +244,10 @@ RISCVTTIImpl::getRegisterBitWidth(TargetTransformInfo::RegisterKind K) const {
 InstructionCost RISCVTTIImpl::getGatherScatterOpCost(
     unsigned Opcode, Type *DataTy, const Value *Ptr, bool VariableMask,
     Align Alignment, TTI::TargetCostKind CostKind, const Instruction *I) {
+  // We can do gather/scatter using a single instruction.
+  // FIXME: The actual cost is likely to be higher than that.  
+  if (isa<ScalableVectorType>(DataTy))
+    return 1;
   if (CostKind != TTI::TCK_RecipThroughput)
     return BaseT::getGatherScatterOpCost(Opcode, DataTy, Ptr, VariableMask,
                                          Alignment, CostKind, I);
@@ -265,6 +269,31 @@ InstructionCost RISCVTTIImpl::getGatherScatterOpCost(
   InstructionCost MemOpCost =
       getMemoryOpCost(Opcode, VTy->getElementType(), Alignment, 0, CostKind, I);
   return NumLoads * MemOpCost;
+}
+
+InstructionCost RISCVTTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
+                                             VectorType *Tp, ArrayRef<int> Mask,
+                                             int Index, VectorType *SubTp) {
+  if (isa<ScalableVectorType>(Tp) &&
+      (!SubTp || isa<ScalableVectorType>(SubTp))) {
+    switch (Kind) {
+    case TTI::SK_Broadcast:
+      return getBroadcastShuffleOverhead(cast<ScalableVectorType>(Tp));
+    case TTI::SK_Select:
+    case TTI::SK_Reverse:
+    case TTI::SK_Transpose:
+    case TTI::SK_PermuteSingleSrc:
+    case TTI::SK_PermuteTwoSrc:
+      return getPermuteShuffleOverhead(cast<ScalableVectorType>(Tp));
+    case TTI::SK_ExtractSubvector:
+      return getExtractSubvectorOverhead(cast<ScalableVectorType>(Tp), Index,
+                                         cast<ScalableVectorType>(SubTp));
+    case TTI::SK_InsertSubvector:
+      return getInsertSubvectorOverhead(cast<ScalableVectorType>(Tp), Index,
+                                        cast<ScalableVectorType>(SubTp));
+    }
+  }
+  return BaseT::getShuffleCost(Kind, Tp, Mask, Index, SubTp);
 }
 
 void RISCVTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,

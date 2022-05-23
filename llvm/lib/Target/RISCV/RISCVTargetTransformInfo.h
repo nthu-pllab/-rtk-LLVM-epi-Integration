@@ -88,6 +88,85 @@ public:
                                          TTI::TargetCostKind CostKind,
                                          const Instruction *I);
 
+  InstructionCost getShuffleCost(TTI::ShuffleKind Kind, VectorType *Tp,
+                                 ArrayRef<int> Mask, int Index,
+                                 VectorType *SubTp);
+
+  InstructionCost getPermuteShuffleOverhead(ScalableVectorType *VTy) {
+    InstructionCost MinCost = 0;
+    // Shuffle cost is equal to the cost of extracting element from its argument
+    // plus the cost of inserting them onto the result vector.
+
+    // e.g. for a fixed vector <4 x float> has a mask of <0,5,2,7> i.e we need
+    // to extract from index 0 of first vector, index 1 of second vector,index 2
+    // of first vector and finally index 3 of second vector and insert them at
+    // index <0,1,2,3> of result vector.
+    // FIXME: For scalable vectors for now we compute the MinCost based on Min
+    // number of elements but this does not represent the correct cost. This
+    // would be fixed once the cost model has support for scalable vectors.
+    for (int i = 0, e = VTy->getElementCount().getKnownMinValue(); i < e; ++i) {
+      MinCost += getVectorInstrCost(Instruction::InsertElement, VTy, i);
+      MinCost += getVectorInstrCost(Instruction::ExtractElement, VTy, i);
+    }
+    return MinCost;
+  }
+
+  InstructionCost getBroadcastShuffleOverhead(ScalableVectorType *VTy) {
+    InstructionCost MinCost = 0;
+    // Broadcast cost is equal to the cost of extracting the zero'th element
+    // plus the cost of inserting it into every element of the result vector.
+    // FIXME: For scalable vectors for now we compute the MinCost based on Min
+    // number of elements but this does not represent the correct cost. This
+    // would be fixed once the cost model has support for scalable vectors.
+    MinCost += getVectorInstrCost(Instruction::ExtractElement, VTy, 0);
+
+    for (int i = 0, e = VTy->getElementCount().getKnownMinValue(); i < e; ++i) {
+      MinCost += getVectorInstrCost(Instruction::InsertElement, VTy, i);
+    }
+    return MinCost;
+  }
+
+  InstructionCost getExtractSubvectorOverhead(ScalableVectorType *VTy, int Index,
+                                       ScalableVectorType *SubVTy) {
+    assert(VTy && SubVTy && "Can only extract subvectors from vectors");
+    // FIXME: We cannot assert index bounds of SubVTy at compile time.
+
+    unsigned NumSubElts = SubVTy->getElementCount().getKnownMinValue();
+    InstructionCost MinCost = 0;
+    // Subvector extraction cost is equal to the cost of extracting element
+    // from the source type plus the cost of inserting them into the result
+    // vector type.
+    // FIXME: For scalable vectors for now we compute the MinCost based on Min
+    // number of elements but this does not represent the correct cost. This
+    // would be fixed once the cost model has support for scalable vectors.
+    for (unsigned i = 0; i != NumSubElts; ++i) {
+      MinCost +=
+          getVectorInstrCost(Instruction::ExtractElement, VTy, i + Index);
+      MinCost += getVectorInstrCost(Instruction::InsertElement, SubVTy, i);
+    }
+    return MinCost;
+  }
+  
+  InstructionCost getInsertSubvectorOverhead(ScalableVectorType *VTy, int Index,
+                                             ScalableVectorType *SubVTy) {
+    assert(VTy && SubVTy && "Can only insert subvectors into vectors");
+    // FIXME: We cannot assert index bounds of SubVTy at compile time.
+
+    unsigned NumSubElts = SubVTy->getElementCount().getKnownMinValue();
+    InstructionCost MinCost = 0;
+    // Subvector insertion cost is equal to the cost of extracting element
+    // from the source type plus the cost of inserting them into the result
+    // vector type.
+    // FIXME: For scalable vectors for now we compute the MinCost based on Min
+    // number of elements but this does not represent the correct cost. This
+    // would be fixed once the cost model has support for scalable vectors.
+    for (unsigned i = 0; i != NumSubElts; ++i) {
+      MinCost += getVectorInstrCost(Instruction::ExtractElement, SubVTy, i);
+      MinCost += getVectorInstrCost(Instruction::InsertElement, VTy, i + Index);
+    }
+    return MinCost;
+  }
+
   bool isLegalMaskedLoadStore(Type *DataType, Align Alignment) {
     if (!ST->hasVInstructions())
       return false;
