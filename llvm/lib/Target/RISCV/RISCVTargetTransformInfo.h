@@ -55,6 +55,11 @@ public:
                                   TTI::CastContextHint CCH,
                                   TTI::TargetCostKind CostKind,
                                   const Instruction *I = nullptr);
+  InstructionCost getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
+                                      TTI::TargetCostKind CostKind);
+  InstructionCost getMaskedMemoryOpCost(unsigned Opcode, Type *Src,
+                                Align Alignment, unsigned AddressSpace,
+                                TTI::TargetCostKind CostKind); 
 
   TargetTransformInfo::PopcntSupportKind getPopcntSupport(unsigned TyWidth);
 

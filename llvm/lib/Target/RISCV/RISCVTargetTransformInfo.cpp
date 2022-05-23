@@ -147,6 +147,48 @@ InstructionCost RISCVTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst,
   return LegalizationFactor * Log2_32(BitRatio);
 }
 
+InstructionCost
+RISCVTTIImpl::getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
+                                    TTI::TargetCostKind CostKind) {
+  // Taken from AArch64.
+  auto *RetTy = ICA.getReturnType();
+  switch (ICA.getID()) {
+  case Intrinsic::experimental_stepvector: {
+    InstructionCost Cost = 1; // Cost of the `index' instruction
+    auto LT = TLI->getTypeLegalizationCost(DL, RetTy);
+    // Legalisation of illegal vectors involves an `index' instruction plus
+    // (LT.first - 1) vector adds.
+    if (LT.first > 1) {
+      Type *LegalVTy = EVT(LT.second).getTypeForEVT(RetTy->getContext());
+      InstructionCost AddCost =
+          getArithmeticInstrCost(Instruction::Add, LegalVTy, CostKind);
+      Cost += AddCost * (LT.first - 1);
+    }
+    return Cost;
+  }
+  case Intrinsic::nearbyint: {
+    if (isa<ScalableVectorType>(RetTy))
+      return InstructionCost::getInvalid();
+    break;
+  }
+  default:
+    break;
+  }
+
+  return BaseT::getIntrinsicInstrCost(ICA, CostKind);
+}
+
+InstructionCost
+RISCVTTIImpl::getMaskedMemoryOpCost(unsigned Opcode, Type *Src, Align Alignment,
+                                    unsigned AddressSpace,
+                                    TTI::TargetCostKind CostKind) {
+  if (!isa<ScalableVectorType>(Src))
+    return BaseT::getMaskedMemoryOpCost(Opcode, Src, Alignment, AddressSpace,
+                                        CostKind);
+
+  return TLI->getTypeLegalizationCost(DL, Src).first;
+} 
+
 TargetTransformInfo::PopcntSupportKind
 RISCVTTIImpl::getPopcntSupport(unsigned TyWidth) {
   assert(isPowerOf2_32(TyWidth) && "Ty width must be power of 2");
